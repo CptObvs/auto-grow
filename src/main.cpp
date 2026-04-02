@@ -7,13 +7,41 @@
  *  - Timer-basiert: alle 30 Minuten Sensoren prüfen
  *  - Sicherheit: maximale Bewässerungszeit pro Zone, Pause zwischen Zonen
  *  - Serial-Logging für Debugging
- *  - WiFi-Verbindung + einfacher Webserver (Sensorwerte + Ventilstatus)
+ *  - WiFi-Verbindung + ESP-DASH Webinterface (https://github.com/ayushsharma82/ESP-DASH)
+ *    → Fortschrittsbalken für Bodenfeuchte, Buttons für manuelle Bewässerung,
+ *      Pumpenstatus, Echtzeit-Updates per WebSocket
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <ESPDash.h>
 #include "config.h"
+
+// ============================================================
+// Webserver und ESP-DASH Dashboard
+// ============================================================
+
+AsyncWebServer server(80);
+ESPDash dashboard(&server);
+
+// Fortschrittsbalken: Bodenfeuchte je Zone (0–100 %)
+Card feuchteKarte1(&dashboard, PROGRESS_CARD, "Hochbeet 1",   "%");
+Card feuchteKarte2(&dashboard, PROGRESS_CARD, "Hochbeet 2",   "%");
+Card feuchteKarte3(&dashboard, PROGRESS_CARD, "Tomate 1",     "%");
+Card feuchteKarte4(&dashboard, PROGRESS_CARD, "Tomate 2",     "%");
+
+// Buttons: Manuelle Bewässerung pro Zone
+Card btnZone1(&dashboard, BUTTON_CARD, "Zone 1 manuell");
+Card btnZone2(&dashboard, BUTTON_CARD, "Zone 2 manuell");
+Card btnZone3(&dashboard, BUTTON_CARD, "Zone 3 manuell");
+Card btnZone4(&dashboard, BUTTON_CARD, "Zone 4 manuell");
+
+// Status: Pumpe läuft / aus
+Card pumpenStatus(&dashboard, STATUS_CARD, "Pumpe");
+
+// Info: Minuten bis zur nächsten automatischen Prüfung
+Card naechstePruefung(&dashboard, GENERIC_CARD, "Nächste Prüfung", "min");
 
 // ============================================================
 // Globale Zustände
@@ -22,7 +50,7 @@
 // Aktuelle Feuchtewerte in Prozent (0 = trocken, 100 = nass)
 int feuchte[4] = {0, 0, 0, 0};
 
-// Rohwerte der Sensoren (ADC 12-Bit)
+// Rohwerte der Sensoren (ADC 12-Bit, 0–4095)
 int sensorRohwert[4] = {0, 0, 0, 0};
 
 // Ventilstatus: true = offen, false = geschlossen
@@ -31,11 +59,12 @@ bool ventilOffen[4] = {false, false, false, false};
 // Pumpe läuft
 bool pumpeAktiv = false;
 
+// Flags für manuelle Bewässerung — gesetzt von Button-Callbacks,
+// ausgeführt im nächsten loop()-Durchlauf (thread-sicher)
+volatile bool manuelleBewaesserung[4] = {false, false, false, false};
+
 // Zeitstempel der letzten Prüfung
 unsigned long letzterPruefZeitpunkt = 0;
-
-// Webserver auf Port 80
-AsyncWebServer webserver(80);
 
 // ============================================================
 // Hilfsfunktionen
@@ -64,13 +93,35 @@ int rohwertZuProzent(int rohwert, int trocken, int nass) {
 }
 
 /**
+ * Aktualisiert alle ESP-DASH Karten mit aktuellen Werten.
+ */
+void dashboardAktualisieren() {
+    feuchteKarte1.update(feuchte[0]);
+    feuchteKarte2.update(feuchte[1]);
+    feuchteKarte3.update(feuchte[2]);
+    feuchteKarte4.update(feuchte[3]);
+
+    if (pumpeAktiv) {
+        pumpenStatus.update("LÄUFT", "success");
+    } else {
+        pumpenStatus.update("AUS", "idle");
+    }
+
+    unsigned long vergangenMs = millis() - letzterPruefZeitpunkt;
+    int restMinuten = (int)((PRUEF_INTERVALL_MS - min(vergangenMs, PRUEF_INTERVALL_MS)) / 60000);
+    naechstePruefung.update(restMinuten);
+
+    dashboard.sendUpdates();
+}
+
+/**
  * Schaltet Pumpe und ein Ventil ein, wartet die Bewässerungsdauer,
  * schaltet dann beide wieder aus.
  * Active-LOW Relais: LOW = an, HIGH = aus.
  */
 void zoneBewaessern(int ventilIndex) {
-    const int ventilPins[4] = {PIN_VENTIL_1, PIN_VENTIL_2, PIN_VENTIL_3, PIN_VENTIL_4};
-    const char* zoneNamen[4] = {"Hochbeet 1", "Hochbeet 2", "Tomate 1", "Tomate 2"};
+    const int ventilPins[4]    = {PIN_VENTIL_1, PIN_VENTIL_2, PIN_VENTIL_3, PIN_VENTIL_4};
+    const char* zoneNamen[4]   = {"Hochbeet 1", "Hochbeet 2", "Tomate 1", "Tomate 2"};
 
     Serial.printf("[Bewässerung] Zone %d (%s) wird bewässert...\n",
                   ventilIndex + 1, zoneNamen[ventilIndex]);
@@ -80,6 +131,7 @@ void zoneBewaessern(int ventilIndex) {
     digitalWrite(PIN_PUMPE, LOW);
     ventilOffen[ventilIndex] = true;
     pumpeAktiv = true;
+    dashboardAktualisieren();
 
     delay(BEWAESSERUNGS_DAUER_MS);
 
@@ -88,6 +140,7 @@ void zoneBewaessern(int ventilIndex) {
     digitalWrite(ventilPins[ventilIndex], HIGH);
     pumpeAktiv = false;
     ventilOffen[ventilIndex] = false;
+    dashboardAktualisieren();
 
     Serial.printf("[Bewässerung] Zone %d fertig. Pause %lu s...\n",
                   ventilIndex + 1, PAUSE_ZWISCHEN_ZONEN_MS / 1000);
@@ -98,11 +151,11 @@ void zoneBewaessern(int ventilIndex) {
  * Liest alle 4 Sensoren aus und speichert Roh- und Prozentwerte.
  */
 void sensorenLesen() {
-    const int pins[4]     = {PIN_SENSOR_1, PIN_SENSOR_2, PIN_SENSOR_3, PIN_SENSOR_4};
-    const int trocken[4]  = {SENSOR_1_TROCKEN, SENSOR_2_TROCKEN,
-                              SENSOR_3_TROCKEN, SENSOR_4_TROCKEN};
-    const int nass[4]     = {SENSOR_1_NASS, SENSOR_2_NASS,
-                              SENSOR_3_NASS, SENSOR_4_NASS};
+    const int pins[4]    = {PIN_SENSOR_1, PIN_SENSOR_2, PIN_SENSOR_3, PIN_SENSOR_4};
+    const int trocken[4] = {SENSOR_1_TROCKEN, SENSOR_2_TROCKEN,
+                             SENSOR_3_TROCKEN, SENSOR_4_TROCKEN};
+    const int nass[4]    = {SENSOR_1_NASS, SENSOR_2_NASS,
+                             SENSOR_3_NASS, SENSOR_4_NASS};
 
     Serial.println("[Sensoren] Messung läuft...");
     for (int i = 0; i < 4; i++) {
@@ -111,6 +164,7 @@ void sensorenLesen() {
         Serial.printf("  Sensor %d: Rohwert=%d, Feuchte=%d%%\n",
                       i + 1, sensorRohwert[i], feuchte[i]);
     }
+    dashboardAktualisieren();
 }
 
 /**
@@ -129,75 +183,6 @@ void bewaesserungPruefen() {
         }
     }
     Serial.println("[Prüfung] Abgeschlossen.");
-}
-
-// ============================================================
-// Webserver — HTML-Seite
-// ============================================================
-
-/**
- * Erstellt die HTML-Antwort mit aktuellem Status aller Zonen.
- */
-String htmlSeiteErstellen() {
-    const char* zoneNamen[4] = {"Hochbeet 1", "Hochbeet 2", "Tomate 1", "Tomate 2"};
-
-    String html = R"rawliteral(<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
-  <title>auto-grow — Bewässerungssystem</title>
-  <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
-    h1 { color: #2d6a2d; }
-    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-    th, td { padding: 0.5rem 1rem; border: 1px solid #ccc; text-align: left; }
-    th { background: #e8f5e9; }
-    .nass { color: #1565c0; }
-    .trocken { color: #b71c1c; }
-    .aktiv { color: #2e7d32; font-weight: bold; }
-    .inaktiv { color: #757575; }
-    .status { margin: 1rem 0; padding: 0.5rem 1rem; border-radius: 4px; }
-    .pumpe-an { background: #c8e6c9; }
-    .pumpe-aus { background: #f5f5f5; }
-    small { color: #888; }
-  </style>
-</head>
-<body>
-  <h1>🌱 auto-grow</h1>
-  <p>Balkon-Bewässerungssystem | <small>Seite lädt automatisch alle 30 s</small></p>
-)rawliteral";
-
-    // Pumpenstatus
-    html += "<div class=\"status ";
-    html += pumpeAktiv ? "pumpe-an\">🔵 Pumpe: <strong>LÄUFT</strong>" : "pumpe-aus\">⚪ Pumpe: <strong>AUS</strong>";
-    html += "</div>\n";
-
-    // Zonentabelle
-    html += "<table>\n";
-    html += "<tr><th>Zone</th><th>Feuchte</th><th>Rohwert</th><th>Ventil</th></tr>\n";
-
-    for (int i = 0; i < 4; i++) {
-        bool trocken = feuchte[i] < FEUCHTE_SCHWELLWERT;
-        html += "<tr>";
-        html += "<td>" + String(zoneNamen[i]) + "</td>";
-        html += "<td class=\"" + String(trocken ? "trocken" : "nass") + "\">";
-        html += String(feuchte[i]) + "%" + String(trocken ? " ⚠️" : " ✅");
-        html += "</td>";
-        html += "<td>" + String(sensorRohwert[i]) + "</td>";
-        html += "<td class=\"" + String(ventilOffen[i] ? "aktiv" : "inaktiv") + "\">";
-        html += ventilOffen[i] ? "OFFEN 💧" : "ZU";
-        html += "</td></tr>\n";
-    }
-
-    html += "</table>\n";
-    html += "<p><small>Schwellwert: " + String(FEUCHTE_SCHWELLWERT) + "% | ";
-    html += "Nächste Prüfung in: ~" +
-            String((PRUEF_INTERVALL_MS - (millis() - letzterPruefZeitpunkt)) / 60000) +
-            " min</small></p>\n";
-    html += "</body></html>";
-    return html;
 }
 
 // ============================================================
@@ -221,6 +206,13 @@ void setup() {
     analogReadResolution(12);
     Serial.println("[System] ADC: 12-Bit Auflösung.");
 
+    // ESP-DASH Button-Callbacks registrieren
+    // Callback läuft im WebServer-Task → nur Flag setzen, Ausführung in loop()
+    btnZone1.attachCallback([](int val) { if (val) manuelleBewaesserung[0] = true; });
+    btnZone2.attachCallback([](int val) { if (val) manuelleBewaesserung[1] = true; });
+    btnZone3.attachCallback([](int val) { if (val) manuelleBewaesserung[2] = true; });
+    btnZone4.attachCallback([](int val) { if (val) manuelleBewaesserung[3] = true; });
+
     // WiFi verbinden
     Serial.printf("[WiFi] Verbinde mit \"%s\"...\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -234,13 +226,9 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("\n[WiFi] Verbunden! IP-Adresse: %s\n",
                       WiFi.localIP().toString().c_str());
-
-        // Webserver-Route registrieren
-        webserver.on("/", HTTP_GET, [](AsyncWebServerRequest* anfrage) {
-            anfrage->send(200, "text/html", htmlSeiteErstellen());
-        });
-        webserver.begin();
-        Serial.println("[Webserver] Gestartet auf Port 80.");
+        server.begin();
+        Serial.println("[Webserver] ESP-DASH gestartet auf Port 80.");
+        Serial.println("[Webserver] https://github.com/ayushsharma82/ESP-DASH");
     } else {
         Serial.println("\n[WiFi] Verbindung fehlgeschlagen — Offline-Betrieb.");
     }
@@ -260,6 +248,16 @@ void setup() {
 void loop() {
     unsigned long jetztMs = millis();
 
+    // Manuelle Bewässerung über Dashboard-Button
+    for (int i = 0; i < 4; i++) {
+        if (manuelleBewaesserung[i]) {
+            manuelleBewaesserung[i] = false;
+            Serial.printf("[Manuell] Zone %d ausgelöst über Dashboard.\n", i + 1);
+            zoneBewaessern(i);
+            sensorenLesen();
+        }
+    }
+
     // Alle 30 Minuten Sensoren prüfen und ggf. bewässern
     if (jetztMs - letzterPruefZeitpunkt >= PRUEF_INTERVALL_MS) {
         Serial.printf("\n[Timer] %lu ms seit letzter Prüfung — neuer Zyklus.\n",
@@ -269,5 +267,13 @@ void loop() {
         letzterPruefZeitpunkt = millis();
     }
 
+    // Dashboard-Countdown aktualisieren (jede Minute)
+    static unsigned long letztesDashboardUpdate = 0;
+    if (jetztMs - letztesDashboardUpdate >= 60000) {
+        dashboardAktualisieren();
+        letztesDashboardUpdate = jetztMs;
+    }
+
     delay(1000);
 }
+

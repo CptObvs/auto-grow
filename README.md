@@ -6,7 +6,9 @@ ESP32-powered smart irrigation system for balcony raised beds — automates wate
 
 ## Projektübersicht
 
-Automatisches Bewässerungssystem für 4 Hochbeete/Pflanztöpfe auf dem Balkon. Ein ESP32 liest kapazitive Bodenfeuchtesensoren aus und öffnet bei Bedarf jeweils ein Magnetventil + die Pumpe, um die Pflanze zu bewässern. Alle 30 Minuten wird geprüft, ob Bewässerungsbedarf besteht. Ein einfacher Webserver zeigt Sensorwerte und Ventilstatus im Browser an.
+Automatisches Bewässerungssystem für 4 Hochbeete/Pflanztöpfe auf dem Balkon. Ein ESP32 liest kapazitive Bodenfeuchtesensoren aus und öffnet bei Bedarf jeweils ein Magnetventil + die Pumpe, um die Pflanze zu bewässern. Alle 30 Minuten wird geprüft, ob Bewässerungsbedarf besteht.
+
+Das Webinterface basiert auf **[ESP-DASH](https://github.com/ayushsharma82/ESP-DASH)** — einem quelloffenen ESP32/ESP8266 Dashboard mit Echtzeit-WebSocket-Updates, Fortschrittsbalken für Feuchtigkeitswerte und Buttons für manuelle Bewässerung.
 
 ## Projektstruktur
 
@@ -119,7 +121,22 @@ Die kapazitiven Sensoren v1.2 geben einen analogen Wert zwischen 0 und 4095 (12-
 
 ---
 
-## Schnellstart
+## Webinterface (ESP-DASH)
+
+Das Dashboard läuft direkt auf dem ESP32 und ist im Browser unter der IP-Adresse des ESP32 erreichbar. Es basiert auf **[ESP-DASH](https://github.com/ayushsharma82/ESP-DASH)** von [@ayushsharma82](https://github.com/ayushsharma82).
+
+| Karte | Typ | Inhalt |
+|-------|-----|--------|
+| Hochbeet 1–4 | Fortschrittsbalken | Bodenfeuchte in % (0 = trocken, 100 = nass) |
+| Zone 1–4 manuell | Button | Manuelle Bewässerung der jeweiligen Zone auslösen |
+| Pumpe | Status | Zeigt ob die Pumpe gerade läuft |
+| Nächste Prüfung | Info | Minuten bis zur nächsten automatischen Prüfung |
+
+Seite aktualisiert sich automatisch per WebSocket — kein manuelles Neuladen nötig.
+
+---
+
+
 
 1. Repository klonen
 2. [PlatformIO](https://platformio.org/) installieren (VSCode-Erweiterung oder CLI)
