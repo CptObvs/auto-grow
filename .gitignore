@@ -1,0 +1,5 @@
+# secrets.yaml enthält WiFi-Passwörter und API-Keys — niemals committen!
+secrets.yaml
+
+# ESPHome Build-Artefakte
+.esphome/

@@ -6,20 +6,24 @@ ESP32-powered smart irrigation system for balcony raised beds — automates wate
 
 ## Projektübersicht
 
-Automatisches Bewässerungssystem für 4 Hochbeete/Pflanztöpfe auf dem Balkon. Ein ESP32 liest kapazitive Bodenfeuchtesensoren aus und öffnet bei Bedarf jeweils ein Magnetventil + die Pumpe, um die Pflanze zu bewässern. Alle 30 Minuten wird geprüft, ob Bewässerungsbedarf besteht.
+Automatisches Bewässerungssystem für 4 Hochbeete/Pflanztöpfe auf dem Balkon. Ein ESP32 liest kapazitive Bodenfeuchtesensoren aus und öffnet bei Bedarf jeweils ein Magnetventil plus die Pumpe, um die Pflanze zu bewässern.
 
-Das Webinterface basiert auf **[ESP-DASH](https://github.com/ayushsharma82/ESP-DASH)** — einem quelloffenen ESP32/ESP8266 Dashboard mit Echtzeit-WebSocket-Updates, Fortschrittsbalken für Feuchtigkeitswerte und Buttons für manuelle Bewässerung.
+Die Firmware basiert auf **[ESPHome](https://github.com/esphome/esphome)** — einem weit verbreiteten Open-Source-Projekt für ESP32/ESP8266, das Firmware aus einer YAML-Konfigurationsdatei generiert. Das eingebaute Web-Interface erlaubt:
+
+- 📊 Echtzeit-Anzeige aller Bodenfeuchtewerte
+- ⚙️ Schwellwerte und Bewässerungsdauer direkt im Browser einstellen (werden im Flash gespeichert — kein Neu-Flashen nötig)
+- 💧 Manuelle Bewässerung einzelner Zonen per Knopfdruck
+- 🔄 Over-the-Air (OTA) Firmware-Updates — kein USB nach dem ersten Flash nötig
 
 ## Projektstruktur
 
 ```
 auto-grow/
 ├── README.md
-├── platformio.ini
-├── src/
-│   └── main.cpp
-├── include/
-│   └── config.h
+├── auto-grow.yaml        ← ESPHome Konfiguration (Haupt-Firmware)
+├── secrets.yaml          ← WiFi-Zugangsdaten (nicht committen! in .gitignore)
+├── secrets.yaml.example  ← Vorlage für secrets.yaml
+├── .gitignore
 └── docs/
     ├── schaltplan.md
     ├── wassersystem.md
@@ -87,74 +91,114 @@ auto-grow/
 | GPIO32 | ADC ← Sensor 3 (Tomate 1) | Eingang analog |
 | GPIO33 | ADC ← Sensor 4 (Tomate 2) | Eingang analog |
 
-> **Hinweis:** Das Relaismodul ist Active-LOW — GPIO HIGH = Relais offen (Ventil zu), GPIO LOW = Relais geschlossen (Ventil auf).
+> **Hinweis:** Das Relaismodul ist Active-LOW — GPIO HIGH = Relais offen (Ventil zu), GPIO LOW = Relais geschlossen (Ventil auf). ESPHome übernimmt das automatisch via `inverted: true`.
+
+---
+
+## Web-Interface (ESPHome)
+
+Die Firmware basiert auf **[ESPHome](https://github.com/esphome/esphome)** von [@esphome](https://github.com/esphome). Das Dashboard ist unter `http://<IP-Adresse>/` erreichbar und in vier Bereiche gegliedert:
+
+| Bereich | Inhalt |
+|---------|--------|
+| 🌱 Bodenfeuchte | Aktuelle Feuchtigkeitswerte aller 4 Zonen in % |
+| ⚙️ Schwellwerte & Zeiten | Schwellwert pro Zone (10–80 %) + Bewässerungsdauer (5–120 s) als Schieberegler — werden im Flash gespeichert |
+| 💧 Ventile & Pumpe | Aktueller Status, manuell ein-/ausschalten |
+| 🔘 Manuelle Steuerung | „Jetzt prüfen", Zone 1–4 manuell bewässern, ESP32 neu starten |
+
+Seite aktualisiert sich automatisch. Alle Einstellungen bleiben nach einem Neustart erhalten.
 
 ---
 
 ## Sensoren kalibrieren
 
-Die kapazitiven Sensoren v1.2 geben einen analogen Wert zwischen 0 und 4095 (12-Bit ADC) zurück.
+Die kapazitiven Sensoren v1.2 geben eine analoge Spannung aus (0–3,3V bei `attenuation: 11dB`).
 
 ### Kalibrierungsverfahren
 
-1. **Trockenwert ermitteln:**
-   - Sensor in trockene Erde stecken (oder in Luft halten)
-   - Seriellen Monitor öffnen (115200 Baud)
-   - Angezeigten Rohwert notieren → `SENSOR_x_TROCKEN` in `config.h` eintragen
+1. **ESPHome Logs öffnen:**
+   ```bash
+   esphome logs auto-grow.yaml
+   ```
+   oder seriellen Monitor (115200 Baud)
 
-2. **Nasswert ermitteln:**
-   - Sensor in nasse/frisch gegossene Erde stecken
-   - Rohwert notieren → `SENSOR_x_NASS` in `config.h` eintragen
+2. **Trockenwert ermitteln:**
+   - Sensor in Luft oder trockene Erde halten
+   - Gemessene Spannung ablesen (typisch ~3,0 V)
 
-3. **Schwellwert festlegen:**
-   - `FEUCHTE_SCHWELLWERT` in `config.h` auf ~40% setzen
-   - Wenn berechnete Feuchte unter 40% → Bewässerung startet
+3. **Nasswert ermitteln:**
+   - Sensor ins Wasser tauchen
+   - Gemessene Spannung ablesen (typisch ~1,2 V)
 
-### Typische Rohwerte (Sensor v1.2, 3,3V)
+4. **In `auto-grow.yaml` eintragen** (Abschnitt `calibrate_linear`):
+   ```yaml
+   - calibrate_linear:
+       - 3.0 -> 0      # Dein V_trocken → 0 %
+       - 1.2 -> 100    # Dein V_nass    → 100 %
+   ```
 
-| Zustand | ADC-Rohwert |
-|---------|-------------|
-| Trocken (Luft) | ~3200–3500 |
-| Nass (Wasser) | ~1200–1500 |
+5. Firmware erneut flashen:
+   ```bash
+   esphome run auto-grow.yaml
+   ```
+
+### Typische Spannungswerte (Sensor v1.2, 3,3V)
+
+| Zustand | Spannung |
+|---------|----------|
+| Trocken (Luft) | ~2,8–3,2 V |
+| Nass (Wasser) | ~1,0–1,4 V |
 
 > Werte können je nach Sensor leicht abweichen — immer selbst kalibrieren!
 
 ---
 
-## Webinterface (ESP-DASH)
+## Schnellstart
 
-Das Dashboard läuft direkt auf dem ESP32 und ist im Browser unter der IP-Adresse des ESP32 erreichbar. Es basiert auf **[ESP-DASH](https://github.com/ayushsharma82/ESP-DASH)** von [@ayushsharma82](https://github.com/ayushsharma82).
+### 1. ESPHome installieren
 
-| Karte | Typ | Inhalt |
-|-------|-----|--------|
-| Hochbeet 1–4 | Fortschrittsbalken | Bodenfeuchte in % (0 = trocken, 100 = nass) |
-| Zone 1–4 manuell | Button | Manuelle Bewässerung der jeweiligen Zone auslösen |
-| Pumpe | Status | Zeigt ob die Pumpe gerade läuft |
-| Nächste Prüfung | Info | Minuten bis zur nächsten automatischen Prüfung |
+```bash
+pip install esphome
+```
 
-Seite aktualisiert sich automatisch per WebSocket — kein manuelles Neuladen nötig.
+Oder als VSCode-Erweiterung: [ESPHome Dashboard](https://esphome.io/guides/getting_started_hassio.html)
 
----
+### 2. Zugangsdaten konfigurieren
 
+```bash
+cp secrets.yaml.example secrets.yaml
+```
 
+`secrets.yaml` öffnen und ausfüllen:
+```yaml
+wifi_ssid: "DeinNetzwerk"
+wifi_password: "DeinPasswort"
+ota_password: "sicheres_passwort"
+api_key: "..."   # generieren: python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())"
+```
 
-1. Repository klonen
-2. [PlatformIO](https://platformio.org/) installieren (VSCode-Erweiterung oder CLI)
-3. `include/config.h` öffnen und WiFi-Zugangsdaten eintragen:
-   ```cpp
-   const char* WIFI_SSID = "DeinNetzwerk";
-   const char* WIFI_PASSWORD = "DeinPasswort";
-   ```
-4. Sensoren kalibrieren und Werte in `config.h` eintragen
-5. Firmware auf den ESP32 flashen:
-   ```bash
-   pio run --target upload
-   ```
-6. Seriellen Monitor öffnen um Logs zu sehen:
-   ```bash
-   pio device monitor
-   ```
-7. Im Browser die IP-Adresse des ESP32 aufrufen → Webinterface
+### 3. Erstmalig flashen (USB)
+
+ESP32 per USB-C anschließen:
+```bash
+esphome run auto-grow.yaml
+```
+
+### 4. IP-Adresse herausfinden & Web-Interface öffnen
+
+```bash
+esphome logs auto-grow.yaml
+# → "[WiFi]: Connected! IP: 192.168.x.x"
+```
+
+Browser: `http://192.168.x.x/`
+
+### 5. Ab jetzt: OTA-Updates (kein USB mehr nötig)
+
+```bash
+esphome run auto-grow.yaml
+# ESPHome erkennt den ESP32 im Netzwerk und flasht per WiFi
+```
 
 ---
 

@@ -1,0 +1,515 @@
+# ============================================================
+# auto-grow — Balkon-Bewässerungssystem
+# ESPHome Konfiguration für ESP32
+#
+# Projekt:  https://github.com/CptObvs/auto-grow
+# ESPHome:  https://github.com/esphome/esphome
+#
+# Installation: pip install esphome
+# Flashen:      esphome run auto-grow.yaml
+# Web-UI:       http://<IP-Adresse des ESP32>
+# ============================================================
+
+esphome:
+  name: auto-grow
+  friendly_name: "Balkon Bewässerungssystem"
+  comment: "ESP32-powered smart irrigation — github.com/CptObvs/auto-grow"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# ============================================================
+# GRUNDEINSTELLUNGEN
+# ============================================================
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+# ESPHome Native API (optional — für Home Assistant Integration)
+api:
+  encryption:
+    key: !secret api_key
+
+# Over-the-Air Updates — nach dem ersten Flash kein USB mehr nötig
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# WiFi — Zugangsdaten in secrets.yaml eintragen
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Fallback-Hotspot falls WiFi nicht erreichbar
+  ap:
+    ssid: "auto-grow Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# ============================================================
+# WEB-INTERFACE (ESPHome Web Server)
+# https://esphome.io/components/web_server.html
+#
+# Aufrufbar unter: http://<IP-Adresse>/
+# Zeigt: Sensorwerte, Ventil-/Pumpenstatus
+# Ermöglicht: Schwellwerte konfigurieren, manuell bewässern
+# ============================================================
+
+web_server:
+  port: 80
+  version: 3
+  sorting_groups:
+    - id: gruppe_sensoren
+      name: "🌱 Bodenfeuchte"
+      sorting_weight: 1
+    - id: gruppe_konfiguration
+      name: "⚙️ Schwellwerte & Zeiten"
+      sorting_weight: 2
+    - id: gruppe_ventile
+      name: "💧 Ventile & Pumpe"
+      sorting_weight: 3
+    - id: gruppe_steuerung
+      name: "🔘 Manuelle Steuerung"
+      sorting_weight: 4
+
+# Zeitserver für korrekte Zeitstempel im Log
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Berlin"
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+
+# ============================================================
+# BODENFEUCHTESENSOREN — Kapazitiv v1.2 (3,3V / ADC1)
+#
+# Kalibrierung (Volt-Werte):
+#   → Sensor in Luft/trockene Erde halten, Spannung ablesen → V_trocken
+#   → Sensor ins Wasser tauchen, Spannung ablesen            → V_nass
+#   Typische Werte: trocken ~3,0 V  |  nass ~1,2 V
+#   Werte in calibrate_linear anpassen!
+#
+# Kalibrierung auslesen: esphome logs auto-grow.yaml
+# oder serieller Monitor (115200 Baud) — Rohwert wird geloggt
+# ============================================================
+
+sensor:
+  - platform: adc
+    pin: GPIO34
+    name: "Bodenfeuchte Hochbeet 1"
+    id: feuchte_1
+    update_interval: 5min
+    attenuation: 11dB
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 1
+    filters:
+      - median:
+          window_size: 5
+          send_every: 5
+      - calibrate_linear:
+          # → Anpassen nach eigener Kalibrierung!
+          - 3.0 -> 0      # V_trocken → 0 %
+          - 1.2 -> 100    # V_nass    → 100 %
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO35
+    name: "Bodenfeuchte Hochbeet 2"
+    id: feuchte_2
+    update_interval: 5min
+    attenuation: 11dB
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 2
+    filters:
+      - median:
+          window_size: 5
+          send_every: 5
+      - calibrate_linear:
+          - 3.0 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO32
+    name: "Bodenfeuchte Tomate 1"
+    id: feuchte_3
+    update_interval: 5min
+    attenuation: 11dB
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 3
+    filters:
+      - median:
+          window_size: 5
+          send_every: 5
+      - calibrate_linear:
+          - 3.0 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO33
+    name: "Bodenfeuchte Tomate 2"
+    id: feuchte_4
+    update_interval: 5min
+    attenuation: 11dB
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 4
+    filters:
+      - median:
+          window_size: 5
+          send_every: 5
+      - calibrate_linear:
+          - 3.0 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  # WLAN-Signalstärke zur Diagnose
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    icon: "mdi:wifi"
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 9
+
+# ============================================================
+# RELAIS — Active-LOW (inverted: true)
+# LOW  = Relais zieht an → Ventil/Pumpe EIN
+# HIGH = Relais fällt ab → Ventil/Pumpe AUS
+# restore_mode: ALWAYS_OFF → nach Neustart immer aus (Sicherheit)
+# ============================================================
+
+switch:
+  - platform: gpio
+    pin:
+      number: GPIO25
+      inverted: true
+    name: "Pumpe"
+    id: pumpe
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:water-pump"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 1
+    on_turn_on:
+      # Sicherheits-Timeout: Pumpe schaltet spätestens nach 3 Minuten ab
+      then:
+        - delay: 180s
+        - switch.turn_off: pumpe
+
+  - platform: gpio
+    pin:
+      number: GPIO26
+      inverted: true
+    name: "Ventil Hochbeet 1"
+    id: ventil_1
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 2
+
+  - platform: gpio
+    pin:
+      number: GPIO27
+      inverted: true
+    name: "Ventil Hochbeet 2"
+    id: ventil_2
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 3
+
+  - platform: gpio
+    pin:
+      number: GPIO14
+      inverted: true
+    name: "Ventil Tomate 1"
+    id: ventil_3
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 4
+
+  - platform: gpio
+    pin:
+      number: GPIO12
+      inverted: true
+    name: "Ventil Tomate 2"
+    id: ventil_4
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 5
+
+# ============================================================
+# KONFIGURIERBARE PARAMETER
+# Werden im Web-Interface als Schieberegler angezeigt.
+# Werte bleiben nach Neustart erhalten (restore_value: true).
+# ============================================================
+
+number:
+  - platform: template
+    name: "Schwellwert Hochbeet 1"
+    id: schwellwert_1
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 1
+
+  - platform: template
+    name: "Schwellwert Hochbeet 2"
+    id: schwellwert_2
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 2
+
+  - platform: template
+    name: "Schwellwert Tomate 1"
+    id: schwellwert_3
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 3
+
+  - platform: template
+    name: "Schwellwert Tomate 2"
+    id: schwellwert_4
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 4
+
+  - platform: template
+    name: "Bewässerungsdauer"
+    id: bewaesserungs_dauer
+    min_value: 5
+    max_value: 120
+    step: 5
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 5
+
+# ============================================================
+# MANUELLE STEUERUNGS-BUTTONS (im Web-Interface)
+# ============================================================
+
+button:
+  - platform: template
+    name: "Jetzt prüfen & bewässern"
+    icon: "mdi:water-check"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 1
+    on_press:
+      then:
+        - script.execute: bewaesserungs_check
+
+  - platform: template
+    name: "Zone 1 manuell (Hochbeet 1)"
+    icon: "mdi:numeric-1-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 2
+    on_press:
+      then:
+        - script.execute: zone_1_bewaessern
+
+  - platform: template
+    name: "Zone 2 manuell (Hochbeet 2)"
+    icon: "mdi:numeric-2-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 3
+    on_press:
+      then:
+        - script.execute: zone_2_bewaessern
+
+  - platform: template
+    name: "Zone 3 manuell (Tomate 1)"
+    icon: "mdi:numeric-3-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 4
+    on_press:
+      then:
+        - script.execute: zone_3_bewaessern
+
+  - platform: template
+    name: "Zone 4 manuell (Tomate 2)"
+    icon: "mdi:numeric-4-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 5
+    on_press:
+      then:
+        - script.execute: zone_4_bewaessern
+
+  - platform: restart
+    name: "ESP32 Neustart"
+    icon: "mdi:restart"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 9
+
+# ============================================================
+# BEWÄSSERUNGS-SKRIPTE
+# mode: single → gleichzeitiger Start wird verhindert
+# ============================================================
+
+script:
+  # --- Zone 1 ---
+  - id: zone_1_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 1 (Hochbeet 1) startet"
+      - switch.turn_on: ventil_1
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_1
+      - logger.log: "Bewässerung Zone 1 fertig"
+
+  # --- Zone 2 ---
+  - id: zone_2_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 2 (Hochbeet 2) startet"
+      - switch.turn_on: ventil_2
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_2
+      - logger.log: "Bewässerung Zone 2 fertig"
+
+  # --- Zone 3 ---
+  - id: zone_3_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 3 (Tomate 1) startet"
+      - switch.turn_on: ventil_3
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_3
+      - logger.log: "Bewässerung Zone 3 fertig"
+
+  # --- Zone 4 ---
+  - id: zone_4_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 4 (Tomate 2) startet"
+      - switch.turn_on: ventil_4
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_4
+      - logger.log: "Bewässerung Zone 4 fertig"
+
+  # --- Automatischer Check (alle Zonen nacheinander) ---
+  - id: bewaesserungs_check
+    mode: single
+    then:
+      - logger.log: "Bewässerungs-Check gestartet"
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_1).state) && id(feuchte_1).state < id(schwellwert_1).state;'
+          then:
+            - script.execute: zone_1_bewaessern
+            - script.wait: zone_1_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_2).state) && id(feuchte_2).state < id(schwellwert_2).state;'
+          then:
+            - script.execute: zone_2_bewaessern
+            - script.wait: zone_2_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_3).state) && id(feuchte_3).state < id(schwellwert_3).state;'
+          then:
+            - script.execute: zone_3_bewaessern
+            - script.wait: zone_3_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_4).state) && id(feuchte_4).state < id(schwellwert_4).state;'
+          then:
+            - script.execute: zone_4_bewaessern
+            - script.wait: zone_4_bewaessern
+      - logger.log: "Bewässerungs-Check abgeschlossen"
+
+# ============================================================
+# ZEITPLAN — Alle 30 Minuten automatisch prüfen
+# ============================================================
+
+interval:
+  - interval: 30min
+    then:
+      - script.execute: bewaesserungs_check

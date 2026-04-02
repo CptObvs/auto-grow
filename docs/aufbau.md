@@ -223,42 +223,61 @@ Am Standort (Topf/Beet) müssen Ventil und Sensor an das 4-adrige Kabel angeschl
 ## Schritt 11 — Sensoren kalibrieren
 
 1. Firmware flashen (Schritt 12)
-2. Seriellen Monitor öffnen (`pio device monitor`, 115200 Baud)
+2. ESPHome Logs öffnen:
+   ```bash
+   esphome logs auto-grow.yaml
+   ```
 3. **Trockenwert:**
    - Sensor in Luft halten
-   - Rohwert ablesen (typisch ~3200–3500)
-   - In `include/config.h` als `SENSOR_x_TROCKEN` eintragen
+   - Gemessene Spannung ablesen (typisch ~3,0 V)
+   - In `auto-grow.yaml` unter `calibrate_linear` eintragen: `3.0 -> 0`
 4. **Nasswert:**
    - Sensor in ein Glas Wasser tauchen
-   - Rohwert ablesen (typisch ~1200–1500)
-   - In `include/config.h` als `SENSOR_x_NASS` eintragen
-5. Firmware erneut flashen mit neuen Kalibrierungswerten
+   - Spannung ablesen (typisch ~1,2 V)
+   - Eintragen: `1.2 -> 100`
+5. Firmware erneut flashen:
+   ```bash
+   esphome run auto-grow.yaml
+   ```
 
 ---
 
-## Schritt 12 — Firmware flashen
+## Schritt 12 — Firmware flashen (ESPHome)
 
-1. Repository klonen:
+Die Firmware basiert auf **[ESPHome](https://github.com/esphome/esphome)**.
+
+1. Repository klonen und ESPHome installieren:
    ```bash
    git clone https://github.com/CptObvs/auto-grow.git
    cd auto-grow
+   pip install esphome
    ```
-2. `include/config.h` öffnen, WiFi-Zugangsdaten eintragen:
-   ```cpp
-   const char* WIFI_SSID     = "DeinNetzwerk";
-   const char* WIFI_PASSWORD = "DeinPasswort";
-   ```
-3. ESP32 per USB-C anschließen
-4. Flashen:
+
+2. Zugangsdaten konfigurieren:
    ```bash
-   pio run --target upload
+   cp secrets.yaml.example secrets.yaml
    ```
-5. Seriellen Monitor starten:
+   `secrets.yaml` öffnen und WiFi-Daten, OTA-Passwort und API-Key eintragen.
+
+3. ESP32 per USB-C anschließen und erstmalig flashen:
    ```bash
-   pio device monitor
+   esphome run auto-grow.yaml
    ```
-6. IP-Adresse aus dem Serial Monitor ablesen
-7. IP im Browser aufrufen → **ESP-DASH Dashboard** öffnet sich
+
+4. IP-Adresse aus dem Log ablesen:
+   ```
+   [WiFi]: Connected! IP: 192.168.x.x
+   ```
+
+5. Im Browser aufrufen → **ESPHome Web-Interface** öffnet sich:
+   ```
+   http://192.168.x.x/
+   ```
+
+6. **Ab jetzt OTA-Updates** — kein USB mehr nötig:
+   ```bash
+   esphome run auto-grow.yaml   # flasht per WiFi
+   ```
 
 ---
 
@@ -291,5 +310,5 @@ Am Standort (Topf/Beet) müssen Ventil und Sensor an das 4-adrige Kabel angeschl
 | Sensor zeigt immer 0% | 3V3 falsch angeschlossen | VCC-Pin prüfen |
 | Sensor zeigt immer 100% | Signal-Ader vertauscht | Ader 4 prüfen |
 | Pumpe läuft, kein Wasser | Ventil bleibt zu | Relais-Anschluss prüfen |
-| WiFi verbindet nicht | Falsche Zugangsdaten | config.h prüfen |
+| WiFi verbindet nicht | Falsche Zugangsdaten | secrets.yaml prüfen |
 | Dashboard leer | IP-Adresse falsch | Serial Monitor öffnen |
