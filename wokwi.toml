@@ -1,0 +1,15 @@
+# Wokwi ESP32 Simulation für auto-grow
+# Docs: https://docs.wokwi.com/vscode/getting-started
+# Ref:  https://community.home-assistant.io/t/wokwi-and-esphome-simulate-your-project/646507
+
+[wokwi]
+version = 1
+# Pfad zur kompilierten ESPHome-Firmware (factory = inkl. Bootloader + Partition Table)
+firmware = ".esphome/build/auto-grow/.pioenvs/auto-grow/firmware.factory.bin"
+elf = ".esphome/build/auto-grow/.pioenvs/auto-grow/firmware.elf"
+
+# Port-Forwarding: ESPHome Web-Interface im Browser erreichbar
+# → http://localhost:8180
+[[net.forward]]
+from = "localhost:8180"
+to = "target:80"

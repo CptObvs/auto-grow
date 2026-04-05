@@ -1,0 +1,17 @@
+# secrets.yaml enthält WiFi-Passwörter und API-Keys — niemals committen!
+secrets.yaml
+
+# ESPHome Build-Artefakte
+.esphome/
+.pio-cache/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Wokwi (lokale Lizenz-Daten)
+.wokwi/

@@ -1,0 +1,669 @@
+# ============================================================
+# auto-grow — Balkon-Bewässerungssystem
+# ESPHome Konfiguration für ESP32
+#
+# Projekt:  https://github.com/CptObvs/auto-grow
+#
+# Flashen:  esphome run auto-grow.yaml
+# Logs:     esphome logs auto-grow.yaml
+# Web-UI:   http://<IP-Adresse>/
+#
+# HARDWARE-ÜBERSICHT
+# ──────────────────
+# Stromversorgung:
+#   12V Netzteil → Relaisboard + Pumpe + Ventile
+#   12V Netzteil → Buck Converter (auf 5V einstellen) → ESP32 VIN
+#   ESP32 3V3-Pin → Bodenfeuchtesensoren
+#
+# Pinbelegung ESP32:
+#   GPIO34  ADC  Bodenfeuchte Hochbeet 1
+#   GPIO35  ADC  Bodenfeuchte Hochbeet 2
+#   GPIO32  ADC  Bodenfeuchte Tomate 1
+#   GPIO33  ADC  Bodenfeuchte Tomate 2
+#   GPIO25  OUT  Relais Pumpe
+#   GPIO26  OUT  Relais Ventil Hochbeet 1
+#   GPIO27  OUT  Relais Ventil Hochbeet 2
+#   GPIO14  OUT  Relais Ventil Kasten 1
+#   GPIO12  OUT  Relais Ventil Kasten 2  (Strapping-Pin, warning unterdrückt)
+#
+# Relaisboard:
+#   12V Spulen (SRD-12VDC-SL-C)
+#   Jumper pro Kanal auf HIGH-Level Trigger stellen
+#   HIGH (3,3V vom ESP32) = Relais zieht an
+#   LOW / kein Signal     = Relais fällt ab (pulldown sichert das ab)
+# ============================================================
+
+esphome:
+  name: auto-grow
+  friendly_name: "Balkon Bewässerungssystem"
+  comment: "ESP32-powered smart irrigation — github.com/CptObvs/auto-grow"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Schreibzugriffe auf Flash reduzieren (restore_value-Werte der number-Komponenten)
+preferences:
+  flash_write_interval: 5min
+
+# ============================================================
+# KONNEKTIVITÄT
+# ============================================================
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  ap:
+    ssid: "auto-grow Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# ============================================================
+# WEB-INTERFACE
+# ============================================================
+
+web_server:
+  port: 80
+  version: 3
+  sorting_groups:
+    - id: gruppe_sensoren
+      name: "🌱 Bodenfeuchte"
+      sorting_weight: 1
+    - id: gruppe_konfiguration
+      name: "⚙️ Schwellwerte & Zeiten"
+      sorting_weight: 2
+    - id: gruppe_ventile
+      name: "💧 Ventile & Pumpe"
+      sorting_weight: 3
+    - id: gruppe_steuerung
+      name: "🔘 Manuelle Steuerung"
+      sorting_weight: 4
+    - id: gruppe_system
+      name: "📡 System"
+      sorting_weight: 5
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Berlin"
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+
+# ============================================================
+# BODENFEUCHTESENSOREN — Kapazitiv v1.2
+#
+# Versorgung:  3,3V vom ESP32-Pin 3V3
+# Eingang:     ADC1 (GPIO32–35), 12dB Dämpfung (0–3,9V)
+# Kalibrierung (gemessene Rohwerte in Volt):
+#   trocken: ~2,7V → 0 %
+#   nass:    ~1,2V → 100 %
+#
+# Zur Neukalibrierung: esphome logs auto-grow.yaml
+# Sensor trocken/nass halten und Rohwert im Log ablesen.
+# ============================================================
+
+sensor:
+  - platform: adc
+    pin: GPIO34
+    name: "Bodenfeuchte Hochbeet 1"
+    id: feuchte_1
+    update_interval: 1s
+    attenuation: 12db
+    samples: 5
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    state_class: measurement
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 1
+    filters:
+      - median:
+          window_size: 3
+          send_every: 1
+      - calibrate_linear:
+          - 2.7 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO35
+    name: "Bodenfeuchte Hochbeet 2"
+    id: feuchte_2
+    update_interval: 1s
+    attenuation: 12db
+    samples: 5
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    state_class: measurement
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 2
+    filters:
+      - median:
+          window_size: 3
+          send_every: 1
+      - calibrate_linear:
+          - 2.7 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO32
+    name: "Bodenfeuchte Tomate 1"
+    id: feuchte_3
+    update_interval: 1s
+    attenuation: 12db
+    samples: 5
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    state_class: measurement
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 3
+    filters:
+      - median:
+          window_size: 3
+          send_every: 1
+      - calibrate_linear:
+          - 2.7 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: adc
+    pin: GPIO33
+    name: "Bodenfeuchte Tomate 2"
+    id: feuchte_4
+    update_interval: 1s
+    attenuation: 12db
+    samples: 5
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: "mdi:water-percent"
+    state_class: measurement
+    web_server:
+      sorting_group_id: gruppe_sensoren
+      sorting_weight: 4
+    filters:
+      - median:
+          window_size: 3
+          send_every: 1
+      - calibrate_linear:
+          - 2.7 -> 0
+          - 1.2 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    icon: "mdi:wifi"
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 1
+
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+    icon: "mdi:clock-outline"
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 2
+
+  - platform: internal_temperature
+    name: "ESP32 Temperatur"
+    update_interval: 60s
+    icon: "mdi:thermometer"
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 3
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP-Adresse"
+      icon: "mdi:ip-network"
+      web_server:
+        sorting_group_id: gruppe_system
+        sorting_weight: 4
+    ssid:
+      name: "WLAN SSID"
+      icon: "mdi:wifi"
+      web_server:
+        sorting_group_id: gruppe_system
+        sorting_weight: 5
+
+# ============================================================
+# RELAIS — HIGH-Level Trigger
+#
+# Versorgung Spulen: 12V (SRD-12VDC-SL-C)
+# Steuerung:        3,3V vom ESP32 (reicht für Optokoppler)
+# Jumper am Modul:  HIGH-Level Trigger
+#
+# pulldown hält alle Pins LOW solange ESP32 nicht aktiv steuert
+# → kein Anziehen bei Stromverlust, Reset oder Boot
+# restore_mode ALWAYS_OFF stellt sicher dass ESPHome beim Start
+# alle Ausgänge explizit auf LOW setzt
+# ============================================================
+
+switch:
+  - platform: gpio
+    pin:
+      number: GPIO25
+      mode:
+        output: true
+        pulldown: true
+    name: "Pumpe"
+    id: pumpe
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:water-pump"
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 1
+    on_turn_on:
+      then:
+        - if:
+            condition:
+              lambda: 'return !(id(ventil_1).state || id(ventil_2).state || id(ventil_3).state || id(ventil_4).state);'
+            then:
+              - logger.log: "SICHERHEIT: Pumpe ohne offenes Ventil — sofort abschalten!"
+              - switch.turn_off: pumpe
+            else:
+              - script.execute: pump_sicherheits_timeout
+    on_turn_off:
+      then:
+        - script.stop: pump_sicherheits_timeout
+
+  - platform: gpio
+    pin:
+      number: GPIO26
+      mode:
+        output: true
+        pulldown: true
+    name: "Ventil Hochbeet 1"
+    id: ventil_1
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
+    interlock_wait_time: 200ms
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 2
+
+  - platform: gpio
+    pin:
+      number: GPIO27
+      mode:
+        output: true
+        pulldown: true
+    name: "Ventil Hochbeet 2"
+    id: ventil_2
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
+    interlock_wait_time: 200ms
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 3
+
+  - platform: gpio
+    pin:
+      number: GPIO14
+      mode:
+        output: true
+        pulldown: true
+    name: "Ventil Kasten 1"
+    id: ventil_3
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
+    interlock_wait_time: 200ms
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 4
+
+  - platform: gpio
+    pin:
+      number: GPIO12
+      mode:
+        output: true
+        pulldown: true
+      ignore_strapping_warning: true
+    name: "Ventil Kasten 2"
+    id: ventil_4
+    restore_mode: ALWAYS_OFF
+    icon: "mdi:valve"
+    interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
+    interlock_wait_time: 200ms
+    web_server:
+      sorting_group_id: gruppe_ventile
+      sorting_weight: 5
+
+# ============================================================
+# KONFIGURIERBARE PARAMETER (Web-Interface)
+# Alle Werte bleiben nach Neustart erhalten (restore_value: true)
+# ============================================================
+
+number:
+  - platform: template
+    name: "Schwellwert Hochbeet 1"
+    id: schwellwert_1
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 1
+
+  - platform: template
+    name: "Schwellwert Hochbeet 2"
+    id: schwellwert_2
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 2
+
+  - platform: template
+    name: "Schwellwert Kasten 1"
+    id: schwellwert_3
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 3
+
+  - platform: template
+    name: "Schwellwert Kasten 2"
+    id: schwellwert_4
+    min_value: 10
+    max_value: 80
+    step: 5
+    initial_value: 40
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 4
+
+  - platform: template
+    name: "Bewässerungsdauer"
+    id: bewaesserungs_dauer
+    min_value: 5
+    max_value: 120
+    step: 5
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 5
+
+select:
+  - platform: template
+    name: "Bewässerungs-Intervall"
+    id: bewaesserungs_intervall
+    options:
+      - "5 Minuten (Test)"
+      - "1 Stunde"
+      - "6 Stunden"
+      - "12 Stunden"
+      - "24 Stunden"
+    initial_option: "1 Stunde"
+    optimistic: true
+    restore_value: true
+    icon: "mdi:timer-outline"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 6
+    on_value:
+      then:
+        - globals.set:
+            id: stunden_zaehler
+            value: '0'
+
+# ============================================================
+# MANUELLE STEUERUNG (Web-Interface)
+# ============================================================
+
+button:
+  - platform: template
+    name: "Jetzt prüfen & bewässern"
+    icon: "mdi:water-check"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 1
+    on_press:
+      then:
+        - script.execute: bewaesserungs_check
+
+  - platform: template
+    name: "Zone 1 manuell (Hochbeet 1)"
+    icon: "mdi:numeric-1-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 2
+    on_press:
+      then:
+        - script.execute: zone_1_bewaessern
+
+  - platform: template
+    name: "Zone 2 manuell (Hochbeet 2)"
+    icon: "mdi:numeric-2-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 3
+    on_press:
+      then:
+        - script.execute: zone_2_bewaessern
+
+  - platform: template
+    name: "Zone 3 manuell (Kasten 1)"
+    icon: "mdi:numeric-3-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 4
+    on_press:
+      then:
+        - script.execute: zone_3_bewaessern
+
+  - platform: template
+    name: "Zone 4 manuell (Kasten 2)"
+    icon: "mdi:numeric-4-circle"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 5
+    on_press:
+      then:
+        - script.execute: zone_4_bewaessern
+
+  - platform: safe_mode
+    name: "Safe Mode (OTA-Recovery)"
+    icon: "mdi:shield-refresh"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 99
+
+  - platform: restart
+    name: "ESP32 Neustart"
+    icon: "mdi:restart"
+    web_server:
+      sorting_group_id: gruppe_steuerung
+      sorting_weight: 9
+
+# ============================================================
+# BEWÄSSERUNGS-SKRIPTE
+# ============================================================
+
+globals:
+  - id: stunden_zaehler
+    type: int
+    restore_value: false
+    initial_value: '99'  # beim ersten Boot sofort prüfen
+
+script:
+  # Sicherheits-Timeout: Pumpe nach max. 3 Min abschalten.
+  # Läuft nicht-blockierend damit Zone-Skripte nicht einfrieren.
+  # mode: restart → Timer startet bei erneutem Einschalten neu.
+  - id: pump_sicherheits_timeout
+    mode: restart
+    then:
+      - delay: 180s
+      - logger.log: "SICHERHEIT: Pumpen-Timeout erreicht — abschalten!"
+      - switch.turn_off: pumpe
+
+  - id: zone_1_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 1 (Hochbeet 1) startet"
+      - switch.turn_on: ventil_1
+      - delay: 1s
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_1
+      - logger.log: "Bewässerung Zone 1 fertig"
+
+  - id: zone_2_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 2 (Hochbeet 2) startet"
+      - switch.turn_on: ventil_2
+      - delay: 1s
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_2
+      - logger.log: "Bewässerung Zone 2 fertig"
+
+  - id: zone_3_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 3 (Kasten 1) startet"
+      - switch.turn_on: ventil_3
+      - delay: 1s
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_3
+      - logger.log: "Bewässerung Zone 3 fertig"
+
+  - id: zone_4_bewaessern
+    mode: single
+    then:
+      - logger.log: "Bewässerung Zone 4 (Kasten 2) startet"
+      - switch.turn_on: ventil_4
+      - delay: 1s
+      - switch.turn_on: pumpe
+      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_4
+      - logger.log: "Bewässerung Zone 4 fertig"
+
+  - id: bewaesserungs_check
+    mode: single
+    then:
+      - logger.log: "Bewässerungs-Check gestartet"
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_1).state) && id(feuchte_1).state < id(schwellwert_1).state;'
+          then:
+            - script.execute: zone_1_bewaessern
+            - script.wait: zone_1_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_2).state) && id(feuchte_2).state < id(schwellwert_2).state;'
+          then:
+            - script.execute: zone_2_bewaessern
+            - script.wait: zone_2_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_3).state) && id(feuchte_3).state < id(schwellwert_3).state;'
+          then:
+            - script.execute: zone_3_bewaessern
+            - script.wait: zone_3_bewaessern
+            - delay: 10s
+      - if:
+          condition:
+            lambda: 'return !isnan(id(feuchte_4).state) && id(feuchte_4).state < id(schwellwert_4).state;'
+          then:
+            - script.execute: zone_4_bewaessern
+            - script.wait: zone_4_bewaessern
+      - logger.log: "Bewässerungs-Check abgeschlossen"
+
+# ============================================================
+# ZEITPLAN — Intervall per Web-UI wählbar
+# Basis-Ticker alle 5 Min, Zähler wird gegen gewähltes Intervall geprüft
+# ============================================================
+
+interval:
+  - interval: 5min
+    then:
+      - lambda: 'id(stunden_zaehler) += 1;'
+      - if:
+          condition:
+            lambda: |
+              int ticks = 12;  // Default: 1h = 12 × 5min
+              auto sel = id(bewaesserungs_intervall).current_option();
+              if (sel == "5 Minuten (Test)") ticks = 1;
+              if (sel == "1 Stunde")         ticks = 12;
+              if (sel == "6 Stunden")        ticks = 72;
+              if (sel == "12 Stunden")       ticks = 144;
+              if (sel == "24 Stunden")       ticks = 288;
+              return id(stunden_zaehler) >= ticks;
+          then:
+            - globals.set:
+                id: stunden_zaehler
+                value: '0'
+            - script.execute: bewaesserungs_check
