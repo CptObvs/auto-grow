@@ -67,6 +67,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   fast_connect: true
+  power_save_mode: LIGHT
   ap:
     ssid: "auto-grow Fallback"
     password: !secret ap_password
@@ -123,7 +124,7 @@ sensor:
     pin: GPIO34
     name: "Bodenfeuchte Hochbeet 1"
     id: feuchte_1
-    update_interval: 1s
+    update_interval: 10s
     attenuation: 12db
     samples: 5
     unit_of_measurement: "%"
@@ -137,18 +138,22 @@ sensor:
       - median:
           window_size: 3
           send_every: 1
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
       - calibrate_linear:
           - 2.7 -> 0
           - 1.2 -> 100
       - clamp:
           min_value: 0
           max_value: 100
+      - delta: 1.0
 
   - platform: adc
     pin: GPIO35
     name: "Bodenfeuchte Hochbeet 2"
     id: feuchte_2
-    update_interval: 1s
+    update_interval: 10s
     attenuation: 12db
     samples: 5
     unit_of_measurement: "%"
@@ -162,18 +167,22 @@ sensor:
       - median:
           window_size: 3
           send_every: 1
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
       - calibrate_linear:
           - 2.7 -> 0
           - 1.2 -> 100
       - clamp:
           min_value: 0
           max_value: 100
+      - delta: 1.0
 
   - platform: adc
     pin: GPIO32
     name: "Bodenfeuchte Tomate 1"
     id: feuchte_3
-    update_interval: 1s
+    update_interval: 10s
     attenuation: 12db
     samples: 5
     unit_of_measurement: "%"
@@ -187,18 +196,22 @@ sensor:
       - median:
           window_size: 3
           send_every: 1
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
       - calibrate_linear:
           - 2.7 -> 0
           - 1.2 -> 100
       - clamp:
           min_value: 0
           max_value: 100
+      - delta: 1.0
 
   - platform: adc
     pin: GPIO33
     name: "Bodenfeuchte Tomate 2"
     id: feuchte_4
-    update_interval: 1s
+    update_interval: 10s
     attenuation: 12db
     samples: 5
     unit_of_measurement: "%"
@@ -212,12 +225,16 @@ sensor:
       - median:
           window_size: 3
           send_every: 1
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
       - calibrate_linear:
           - 2.7 -> 0
           - 1.2 -> 100
       - clamp:
           min_value: 0
           max_value: 100
+      - delta: 1.0
 
   - platform: wifi_signal
     name: "WiFi Signal"
@@ -261,6 +278,42 @@ text_sensor:
         sorting_group_id: gruppe_system
         sorting_weight: 5
 
+  - platform: template
+    name: "Letzte Bewässerung Zone 1"
+    lambda: 'return id(letzte_bewaesserung_1);'
+    update_interval: 60s
+    icon: "mdi:history"
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 6
+
+  - platform: template
+    name: "Letzte Bewässerung Zone 2"
+    lambda: 'return id(letzte_bewaesserung_2);'
+    update_interval: 60s
+    icon: "mdi:history"
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 7
+
+  - platform: template
+    name: "Letzte Bewässerung Zone 3"
+    lambda: 'return id(letzte_bewaesserung_3);'
+    update_interval: 60s
+    icon: "mdi:history"
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 8
+
+  - platform: template
+    name: "Letzte Bewässerung Zone 4"
+    lambda: 'return id(letzte_bewaesserung_4);'
+    update_interval: 60s
+    icon: "mdi:history"
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 9
+
 # ============================================================
 # RELAIS — HIGH-Level Trigger
 #
@@ -283,11 +336,8 @@ switch:
         pulldown: true
     name: "Pumpe"
     id: pumpe
+    internal: true
     restore_mode: ALWAYS_OFF
-    icon: "mdi:water-pump"
-    web_server:
-      sorting_group_id: gruppe_ventile
-      sorting_weight: 1
     on_turn_on:
       then:
         - if:
@@ -314,6 +364,16 @@ switch:
     icon: "mdi:valve"
     interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
     interlock_wait_time: 200ms
+    on_turn_on:
+      then:
+        - script.execute: ventil_sicherheits_timeout
+    on_turn_off:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(ventil_1).state && !id(ventil_2).state && !id(ventil_3).state && !id(ventil_4).state;'
+            then:
+              - script.stop: ventil_sicherheits_timeout
     web_server:
       sorting_group_id: gruppe_ventile
       sorting_weight: 2
@@ -330,6 +390,16 @@ switch:
     icon: "mdi:valve"
     interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
     interlock_wait_time: 200ms
+    on_turn_on:
+      then:
+        - script.execute: ventil_sicherheits_timeout
+    on_turn_off:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(ventil_1).state && !id(ventil_2).state && !id(ventil_3).state && !id(ventil_4).state;'
+            then:
+              - script.stop: ventil_sicherheits_timeout
     web_server:
       sorting_group_id: gruppe_ventile
       sorting_weight: 3
@@ -346,6 +416,16 @@ switch:
     icon: "mdi:valve"
     interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
     interlock_wait_time: 200ms
+    on_turn_on:
+      then:
+        - script.execute: ventil_sicherheits_timeout
+    on_turn_off:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(ventil_1).state && !id(ventil_2).state && !id(ventil_3).state && !id(ventil_4).state;'
+            then:
+              - script.stop: ventil_sicherheits_timeout
     web_server:
       sorting_group_id: gruppe_ventile
       sorting_weight: 4
@@ -363,9 +443,29 @@ switch:
     icon: "mdi:valve"
     interlock: [ventil_1, ventil_2, ventil_3, ventil_4]
     interlock_wait_time: 200ms
+    on_turn_on:
+      then:
+        - script.execute: ventil_sicherheits_timeout
+    on_turn_off:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(ventil_1).state && !id(ventil_2).state && !id(ventil_3).state && !id(ventil_4).state;'
+            then:
+              - script.stop: ventil_sicherheits_timeout
     web_server:
       sorting_group_id: gruppe_ventile
       sorting_weight: 5
+
+  - platform: template
+    name: "Automatische Bewässerung"
+    id: automatik_aktiv
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: "mdi:auto-mode"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 9
 
 # ============================================================
 # KONFIGURIERBARE PARAMETER (Web-Interface)
@@ -434,8 +534,8 @@ number:
       sorting_weight: 4
 
   - platform: template
-    name: "Bewässerungsdauer"
-    id: bewaesserungs_dauer
+    name: "Dauer Zone 1 (Hochbeet 1)"
+    id: dauer_zone_1
     min_value: 5
     max_value: 120
     step: 5
@@ -448,28 +548,80 @@ number:
       sorting_group_id: gruppe_konfiguration
       sorting_weight: 5
 
-select:
   - platform: template
-    name: "Bewässerungs-Intervall"
-    id: bewaesserungs_intervall
-    options:
-      - "5 Minuten (Test)"
-      - "1 Stunde"
-      - "6 Stunden"
-      - "12 Stunden"
-      - "24 Stunden"
-    initial_option: "1 Stunde"
+    name: "Dauer Zone 2 (Hochbeet 2)"
+    id: dauer_zone_2
+    min_value: 5
+    max_value: 120
+    step: 5
+    initial_value: 30
     optimistic: true
     restore_value: true
-    icon: "mdi:timer-outline"
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
     web_server:
       sorting_group_id: gruppe_konfiguration
       sorting_weight: 6
-    on_value:
-      then:
-        - globals.set:
-            id: stunden_zaehler
-            value: '0'
+
+  - platform: template
+    name: "Dauer Zone 3 (Kasten 1)"
+    id: dauer_zone_3
+    min_value: 5
+    max_value: 120
+    step: 5
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 7
+
+  - platform: template
+    name: "Dauer Zone 4 (Kasten 2)"
+    id: dauer_zone_4
+    min_value: 5
+    max_value: 120
+    step: 5
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    icon: "mdi:timer"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 8
+
+  - platform: template
+    name: "Bewässerung ab (Stunde)"
+    id: bewaessern_ab
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 6
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "h"
+    icon: "mdi:weather-sunset-up"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 10
+
+  - platform: template
+    name: "Bewässerung bis (Stunde)"
+    id: bewaessern_bis
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 21
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "h"
+    icon: "mdi:weather-sunset-down"
+    web_server:
+      sorting_group_id: gruppe_konfiguration
+      sorting_weight: 11
 
 # ============================================================
 # MANUELLE STEUERUNG (Web-Interface)
@@ -484,7 +636,15 @@ button:
       sorting_weight: 1
     on_press:
       then:
-        - script.execute: bewaesserungs_check
+        - if:
+            condition:
+              lambda: 'return !id(bewaesserungs_check)->is_running();'
+            then:
+              - script.execute: bewaesserungs_check
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "SICHERHEIT: Bewässerungs-Check läuft bereits — ignoriert"
 
   - platform: template
     name: "Zone 1 manuell (Hochbeet 1)"
@@ -494,7 +654,20 @@ button:
       sorting_weight: 2
     on_press:
       then:
-        - script.execute: zone_1_bewaessern
+        - if:
+            condition:
+              lambda: |
+                return !id(zone_1_bewaessern)->is_running() &&
+                       !id(zone_2_bewaessern)->is_running() &&
+                       !id(zone_3_bewaessern)->is_running() &&
+                       !id(zone_4_bewaessern)->is_running() &&
+                       !id(bewaesserungs_check)->is_running();
+            then:
+              - script.execute: zone_1_bewaessern
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "SICHERHEIT: Bewässerung läuft bereits — Zone 1 ignoriert"
 
   - platform: template
     name: "Zone 2 manuell (Hochbeet 2)"
@@ -504,7 +677,20 @@ button:
       sorting_weight: 3
     on_press:
       then:
-        - script.execute: zone_2_bewaessern
+        - if:
+            condition:
+              lambda: |
+                return !id(zone_1_bewaessern)->is_running() &&
+                       !id(zone_2_bewaessern)->is_running() &&
+                       !id(zone_3_bewaessern)->is_running() &&
+                       !id(zone_4_bewaessern)->is_running() &&
+                       !id(bewaesserungs_check)->is_running();
+            then:
+              - script.execute: zone_2_bewaessern
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "SICHERHEIT: Bewässerung läuft bereits — Zone 2 ignoriert"
 
   - platform: template
     name: "Zone 3 manuell (Kasten 1)"
@@ -514,7 +700,20 @@ button:
       sorting_weight: 4
     on_press:
       then:
-        - script.execute: zone_3_bewaessern
+        - if:
+            condition:
+              lambda: |
+                return !id(zone_1_bewaessern)->is_running() &&
+                       !id(zone_2_bewaessern)->is_running() &&
+                       !id(zone_3_bewaessern)->is_running() &&
+                       !id(zone_4_bewaessern)->is_running() &&
+                       !id(bewaesserungs_check)->is_running();
+            then:
+              - script.execute: zone_3_bewaessern
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "SICHERHEIT: Bewässerung läuft bereits — Zone 3 ignoriert"
 
   - platform: template
     name: "Zone 4 manuell (Kasten 2)"
@@ -524,7 +723,20 @@ button:
       sorting_weight: 5
     on_press:
       then:
-        - script.execute: zone_4_bewaessern
+        - if:
+            condition:
+              lambda: |
+                return !id(zone_1_bewaessern)->is_running() &&
+                       !id(zone_2_bewaessern)->is_running() &&
+                       !id(zone_3_bewaessern)->is_running() &&
+                       !id(zone_4_bewaessern)->is_running() &&
+                       !id(bewaesserungs_check)->is_running();
+            then:
+              - script.execute: zone_4_bewaessern
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "SICHERHEIT: Bewässerung läuft bereits — Zone 4 ignoriert"
 
   - platform: safe_mode
     name: "Safe Mode (OTA-Recovery)"
@@ -544,11 +756,37 @@ button:
 # BEWÄSSERUNGS-SKRIPTE
 # ============================================================
 
+binary_sensor:
+  - platform: template
+    name: "Bewässerung aktiv"
+    lambda: |
+      return id(zone_1_bewaessern)->is_running() ||
+             id(zone_2_bewaessern)->is_running() ||
+             id(zone_3_bewaessern)->is_running() ||
+             id(zone_4_bewaessern)->is_running();
+    device_class: running
+    icon: "mdi:water-pump"
+    web_server:
+      sorting_group_id: gruppe_system
+      sorting_weight: 10
+
 globals:
-  - id: stunden_zaehler
-    type: int
+  - id: letzte_bewaesserung_1
+    type: std::string
     restore_value: false
-    initial_value: '99'  # beim ersten Boot sofort prüfen
+    initial_value: '"-"'
+  - id: letzte_bewaesserung_2
+    type: std::string
+    restore_value: false
+    initial_value: '"-"'
+  - id: letzte_bewaesserung_3
+    type: std::string
+    restore_value: false
+    initial_value: '"-"'
+  - id: letzte_bewaesserung_4
+    type: std::string
+    restore_value: false
+    initial_value: '"-"'
 
 script:
   # Sicherheits-Timeout: Pumpe nach max. 3 Min abschalten.
@@ -561,14 +799,35 @@ script:
       - logger.log: "SICHERHEIT: Pumpen-Timeout erreicht — abschalten!"
       - switch.turn_off: pumpe
 
+  # Sicherheits-Timeout: Alle Ventile nach max. 5 Min schließen.
+  # Schutz bei manuell geöffnetem Ventil das nicht wieder geschlossen wird.
+  # mode: restart → Timer wird bei jedem Ventil-Öffnen neu gestartet.
+  - id: ventil_sicherheits_timeout
+    mode: restart
+    then:
+      - delay: 300s
+      - logger.log: "SICHERHEIT: Ventil-Timeout — alle Ventile & Pumpe abschalten!"
+      - switch.turn_off: pumpe
+      - switch.turn_off: ventil_1
+      - switch.turn_off: ventil_2
+      - switch.turn_off: ventil_3
+      - switch.turn_off: ventil_4
+
   - id: zone_1_bewaessern
     mode: single
     then:
+      - lambda: |
+          char buf[20];
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            t.strftime(buf, sizeof(buf), "%d.%m %H:%M");
+            id(letzte_bewaesserung_1) = std::string(buf);
+          }
       - logger.log: "Bewässerung Zone 1 (Hochbeet 1) startet"
       - switch.turn_on: ventil_1
       - delay: 1s
       - switch.turn_on: pumpe
-      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - delay: !lambda 'return id(dauer_zone_1).state * 1000;'
       - switch.turn_off: pumpe
       - switch.turn_off: ventil_1
       - logger.log: "Bewässerung Zone 1 fertig"
@@ -576,11 +835,18 @@ script:
   - id: zone_2_bewaessern
     mode: single
     then:
+      - lambda: |
+          char buf[20];
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            t.strftime(buf, sizeof(buf), "%d.%m %H:%M");
+            id(letzte_bewaesserung_2) = std::string(buf);
+          }
       - logger.log: "Bewässerung Zone 2 (Hochbeet 2) startet"
       - switch.turn_on: ventil_2
       - delay: 1s
       - switch.turn_on: pumpe
-      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - delay: !lambda 'return id(dauer_zone_2).state * 1000;'
       - switch.turn_off: pumpe
       - switch.turn_off: ventil_2
       - logger.log: "Bewässerung Zone 2 fertig"
@@ -588,11 +854,18 @@ script:
   - id: zone_3_bewaessern
     mode: single
     then:
+      - lambda: |
+          char buf[20];
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            t.strftime(buf, sizeof(buf), "%d.%m %H:%M");
+            id(letzte_bewaesserung_3) = std::string(buf);
+          }
       - logger.log: "Bewässerung Zone 3 (Kasten 1) startet"
       - switch.turn_on: ventil_3
       - delay: 1s
       - switch.turn_on: pumpe
-      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - delay: !lambda 'return id(dauer_zone_3).state * 1000;'
       - switch.turn_off: pumpe
       - switch.turn_off: ventil_3
       - logger.log: "Bewässerung Zone 3 fertig"
@@ -600,11 +873,18 @@ script:
   - id: zone_4_bewaessern
     mode: single
     then:
+      - lambda: |
+          char buf[20];
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) {
+            t.strftime(buf, sizeof(buf), "%d.%m %H:%M");
+            id(letzte_bewaesserung_4) = std::string(buf);
+          }
       - logger.log: "Bewässerung Zone 4 (Kasten 2) startet"
       - switch.turn_on: ventil_4
       - delay: 1s
       - switch.turn_on: pumpe
-      - delay: !lambda 'return id(bewaesserungs_dauer).state * 1000;'
+      - delay: !lambda 'return id(dauer_zone_4).state * 1000;'
       - switch.turn_off: pumpe
       - switch.turn_off: ventil_4
       - logger.log: "Bewässerung Zone 4 fertig"
@@ -643,27 +923,21 @@ script:
       - logger.log: "Bewässerungs-Check abgeschlossen"
 
 # ============================================================
-# ZEITPLAN — Intervall per Web-UI wählbar
-# Basis-Ticker alle 5 Min, Zähler wird gegen gewähltes Intervall geprüft
+# AUTOMATISCHER CHECK — alle 5 Minuten, feuchtebasiert
+# Tageszeit-Sperre und Automatik-Switch verhindern ungewollte Bewässerung
 # ============================================================
 
 interval:
   - interval: 5min
     then:
-      - lambda: 'id(stunden_zaehler) += 1;'
       - if:
           condition:
             lambda: |
-              int ticks = 12;  // Default: 1h = 12 × 5min
-              auto sel = id(bewaesserungs_intervall).current_option();
-              if (sel == "5 Minuten (Test)") ticks = 1;
-              if (sel == "1 Stunde")         ticks = 12;
-              if (sel == "6 Stunden")        ticks = 72;
-              if (sel == "12 Stunden")       ticks = 144;
-              if (sel == "24 Stunden")       ticks = 288;
-              return id(stunden_zaehler) >= ticks;
+              if (!id(automatik_aktiv).state) return false;
+              auto t = id(sntp_time).now();
+              if (!t.is_valid()) return true;   // kein NTP → trotzdem prüfen
+              int h = t.hour;
+              return h >= (int)id(bewaessern_ab).state &&
+                     h <  (int)id(bewaessern_bis).state;
           then:
-            - globals.set:
-                id: stunden_zaehler
-                value: '0'
             - script.execute: bewaesserungs_check

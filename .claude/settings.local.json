@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(yaml|yml\\)$|esphome\")",
+      "Bash(grep -E \"\\\\.\\(sh|bat|yml|json|yaml\\)$|venv|\\\\.git\")",
+      "WebFetch(domain:esphome.io)",
+      "WebFetch(domain:api-docs.esphome.io)",
+      "Bash(cmd /c compile.bat)",
+      "Bash(.venv/Scripts/esphome.exe compile *)",
+      "Bash(powershell -Command \"Get-PnpDevice -Class Ports -Status OK | Select-Object FriendlyName, Status\")"
+    ]
+  }
+}

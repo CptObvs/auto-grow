@@ -3,7 +3,7 @@
 # Usage: ./flash.sh [COM_PORT]
 
 # Default COM port
-COM_PORT=${1:-COM3}
+COM_PORT=${1:-COM4}
 
 # Activate venv if available
 if [ -d ".venv/Scripts" ]; then
